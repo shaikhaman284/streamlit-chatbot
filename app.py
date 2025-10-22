@@ -9,9 +9,9 @@ import time
 import hashlib
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.agents import initialize_agent, AgentType
 from langchain_core.tools import Tool
 from langchain_core.prompts import PromptTemplate
+from langgraph.prebuilt import create_react_agent
 
 # Import fixes
 try:
@@ -395,25 +395,20 @@ if api_key:
         Tool(
             name="PDF_Search",
             func=rag_tool_func,
-            description="Search and analyze the uploaded PDF document. Use when the user asks questions about: document content, summaries, specific information from the PDF. Input should be the user's question about the PDF."
+            description="Search and analyze the uploaded PDF document. Use this when the user asks questions about document content, summaries, or specific information from the PDF. Input should be the user's question."
         ),
         Tool(
             name="Calculator", 
             func=calculator_tool_func,
-            description="Perform mathematical calculations. Use when the user asks for arithmetic operations. Input should be a mathematical expression like '15 * 24' or '100 + 50'."
+            description="Perform mathematical calculations. Use this when the user asks for arithmetic operations like addition, subtraction, multiplication, or division. Input should be a mathematical expression."
         )
     ]
     
-    # Initialize agent using the new API
+    # Initialize agent using LangGraph's create_react_agent
     if "agent" not in st.session_state or st.session_state.agent is None:
-        st.session_state.agent = initialize_agent(
-            tools=tools,
-            llm=st.session_state.llm,
-            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=max_iterations,
-            max_execution_time=max_time
+        st.session_state.agent = create_react_agent(
+            st.session_state.llm,
+            tools
         )
 
 # ---------- MAIN CHAT INTERFACE ----------
@@ -494,12 +489,19 @@ if api_key:
                         convo_context = get_conversation_context(n=3)
                         enhanced_input = f"Previous conversation:\n{convo_context}\n\nUser's current question: {user_input}"
                         
-                        # Use the agent with the new API
-                        response = st.session_state.agent.invoke({"input": enhanced_input})
+                        # Use the LangGraph agent
+                        response = st.session_state.agent.invoke(
+                            {"messages": [{"role": "user", "content": enhanced_input}]}
+                        )
                         
-                        # Extract the output
-                        if isinstance(response, dict):
-                            answer = response.get("output", "I'm having trouble processing that request.")
+                        # Extract the final answer from the response
+                        if isinstance(response, dict) and "messages" in response:
+                            # Get the last AI message
+                            ai_messages = [msg for msg in response["messages"] if hasattr(msg, 'content') and msg.type == 'ai']
+                            if ai_messages:
+                                answer = ai_messages[-1].content
+                            else:
+                                answer = "I'm having trouble processing that request."
                         else:
                             answer = str(response)
                         
@@ -516,13 +518,13 @@ if api_key:
                         st.session_state.messages.append({"role": "assistant", "content": answer})
                         
                     except Exception as e:
-                        error_msg = "I'm having trouble with that request. "
-                        if "iteration limit" in str(e).lower():
+                        error_msg = f"I'm having trouble with that request: {str(e)}. "
+                        if "iteration" in str(e).lower():
                             error_msg += "Could you try asking a more specific question?"
-                        elif "time limit" in str(e).lower():
+                        elif "time" in str(e).lower():
                             error_msg += "That's taking too long to process. Could you try a simpler question?"
                         else:
-                            error_msg += f"Please try rephrasing your question. (Error: {str(e)})"
+                            error_msg += "Please try rephrasing your question."
                         
                         response_placeholder.write(error_msg)
                         st.session_state.messages.append({"role": "assistant", "content": error_msg})
