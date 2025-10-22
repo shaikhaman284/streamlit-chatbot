@@ -9,9 +9,11 @@ import time
 import hashlib
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.agents import create_react_agent, AgentExecutor
+from langchain.agents import AgentExecutor
+from langchain.agents import create_react_agent  # Try this first
 from langchain_core.tools import Tool
 from langchain_core.prompts import PromptTemplate
+
 # Import fixes
 try:
     from langchain_community.document_loaders import PyPDFLoader
