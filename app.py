@@ -9,8 +9,7 @@ import time
 import hashlib
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.agents import create_react_agent
-from langchain.agents import AgentExecutor  # Try this path
+from langchain.agents import initialize_agent, AgentType
 from langchain_core.tools import Tool
 from langchain_core.prompts import PromptTemplate
 
@@ -396,53 +395,25 @@ if api_key:
         Tool(
             name="PDF_Search",
             func=rag_tool_func,
-            description="Search and analyze the uploaded PDF document. Use when the user asks questions about: document content, summaries, specific information from the PDF."
+            description="Search and analyze the uploaded PDF document. Use when the user asks questions about: document content, summaries, specific information from the PDF. Input should be the user's question about the PDF."
         ),
         Tool(
             name="Calculator", 
             func=calculator_tool_func,
-            description="Perform mathematical calculations. Use when the user asks for arithmetic operations."
+            description="Perform mathematical calculations. Use when the user asks for arithmetic operations. Input should be a mathematical expression like '15 * 24' or '100 + 50'."
         )
     ]
     
+    # Initialize agent using the new API
     if "agent" not in st.session_state or st.session_state.agent is None:
-        template = '''You are an intelligent AI assistant that helps users with PDF analysis, calculations, and general questions.
-
-Available tools:
-{tools}
-
-IMPORTANT GUIDELINES:
-1. When users ask about PDFs or file content - use PDF_Search tool
-2. When users ask math questions - use Calculator tool  
-3. For simple greetings or general knowledge - answer directly without tools
-4. Always provide helpful and detailed responses
-
-Use this format ONLY when you need tools:
-
-Question: the input question you must answer
-Thought: I need to determine if this question requires a tool or if I can answer directly
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the specific input for the tool
-Observation: the result of the action
-Thought: I now have the information needed to provide a complete answer
-Final Answer: my comprehensive response to the user
-
-For simple questions, go directly to Final Answer.
-
-Question: {input}
-Thought:{agent_scratchpad}'''
-        
-        prompt = PromptTemplate.from_template(template)
-        react_agent = create_react_agent(st.session_state.llm, tools, prompt)
-        st.session_state.agent = AgentExecutor(
-            agent=react_agent,
+        st.session_state.agent = initialize_agent(
             tools=tools,
+            llm=st.session_state.llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=max_iterations,
-            max_execution_time=max_time,
-            return_intermediate_steps=True,
-            early_stopping_method="force"
+            max_execution_time=max_time
         )
 
 # ---------- MAIN CHAT INTERFACE ----------
@@ -521,9 +492,16 @@ if api_key:
                 else:
                     try:
                         convo_context = get_conversation_context(n=3)
-                        enhanced_input = f"Previous conversation:\n{convo_context}\nUser: {user_input}"
+                        enhanced_input = f"Previous conversation:\n{convo_context}\n\nUser's current question: {user_input}"
+                        
+                        # Use the agent with the new API
                         response = st.session_state.agent.invoke({"input": enhanced_input})
-                        answer = response.get("output", "I'm having trouble processing that request.")
+                        
+                        # Extract the output
+                        if isinstance(response, dict):
+                            answer = response.get("output", "I'm having trouble processing that request.")
+                        else:
+                            answer = str(response)
                         
                         if detected_name and not any(msg.get("content", "").startswith(f"Nice to meet you, {detected_name}") for msg in st.session_state.messages):
                             greeting = f"Nice to meet you, {detected_name}! 👋 "
@@ -544,7 +522,7 @@ if api_key:
                         elif "time limit" in str(e).lower():
                             error_msg += "That's taking too long to process. Could you try a simpler question?"
                         else:
-                            error_msg += "Please try rephrasing your question."
+                            error_msg += f"Please try rephrasing your question. (Error: {str(e)})"
                         
                         response_placeholder.write(error_msg)
                         st.session_state.messages.append({"role": "assistant", "content": error_msg})
